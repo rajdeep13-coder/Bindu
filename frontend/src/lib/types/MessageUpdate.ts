@@ -48,7 +48,7 @@ export interface MessageStreamUpdate {
 	len?: number;
 }
 
-// Tool updates (for MCP and function calling)
+// Tool updates (for function calling)
 export enum MessageToolUpdateType {
 	Call = "call",
 	Result = "result",

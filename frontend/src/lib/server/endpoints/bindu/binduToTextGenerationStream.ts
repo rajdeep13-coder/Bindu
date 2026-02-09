@@ -66,8 +66,7 @@ export async function* binduToTextGenerationStream(
 				if (Array.isArray(msg.parts)) {
 					for (const part of msg.parts) {
 						if (part.kind === 'text' && part.text) {
-							text = part.text;
-							break;
+							text += part.text;
 						}
 					}
 				}
@@ -85,8 +84,10 @@ export async function* binduToTextGenerationStream(
 		text = String(response.result.message || "");
 	}
 	
+	// If still no text, return empty response instead of throwing error
+	// This handles cases like initial task creation or states without content
 	if (!text) {
-		throw new Error("No text content in Bindu response");
+		text = "";
 	}
 
 	// Emit as final answer

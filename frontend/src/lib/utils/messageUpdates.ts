@@ -12,7 +12,6 @@ import {
 } from "$lib/types/MessageUpdate";
 
 import { page } from "$app/state";
-import type { KeyValuePair } from "$lib/types/Tool";
 
 type MessageUpdateRequestOptions = {
 	base: string;
@@ -21,10 +20,6 @@ type MessageUpdateRequestOptions = {
 	isRetry: boolean;
 	isContinue?: boolean;
 	files?: MessageFile[];
-	// Optional: pass selected MCP server names (client-side selection)
-	selectedMcpServerNames?: string[];
-	// Optional: pass selected MCP server configs (for custom client-defined servers)
-	selectedMcpServers?: Array<{ name: string; url: string; headers?: KeyValuePair[] }>;
 };
 export async function fetchMessageUpdates(
 	conversationId: string,
@@ -41,9 +36,6 @@ export async function fetchMessageUpdates(
 		id: opts.messageId,
 		is_retry: opts.isRetry,
 		is_continue: Boolean(opts.isContinue),
-		// Will be ignored server-side if unsupported
-		selectedMcpServerNames: opts.selectedMcpServerNames,
-		selectedMcpServers: opts.selectedMcpServers,
 	});
 
 	opts.files?.forEach((file) => {

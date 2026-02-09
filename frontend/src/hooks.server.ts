@@ -25,7 +25,6 @@ import { refreshConversationStats } from "$lib/jobs/refresh-conversation-stats";
 import { adminTokenManager } from "$lib/server/adminToken";
 import { isHostLocalhost } from "$lib/server/isURLLocal";
 import { MetricsServer } from "$lib/server/metrics";
-import { loadMcpServersOnStartup } from "$lib/server/mcp/registry";
 import { runWithRequestContext, updateRequestContext } from "$lib/server/requestContext";
 
 function getClientAddressSafe(event: RequestEvent): string | undefined {
@@ -64,9 +63,6 @@ export const init: ServerInit = async () => {
 
 		checkAndRunMigrations();
 		refreshConversationStats();
-
-		// Load MCP servers at startup
-		loadMcpServersOnStartup();
 
 		// Init AbortedGenerations refresh process
 		AbortedGenerations.getInstance();

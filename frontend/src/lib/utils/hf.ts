@@ -1,15 +1,13 @@
 // Client-safe HF utilities used in UI components
 
-export function isStrictHfMcpLogin(urlString: string): boolean {
+export function isStrictHfLogin(urlString: string): boolean {
 	try {
 		const u = new URL(urlString);
 		const host = u.hostname.toLowerCase();
-		const allowedHosts = new Set(["hf.co", "huggingface.co"]);
+		const allowedHosts = new Set(["huggingface.co", "login.huggingface.co"]);
 		return (
 			u.protocol === "https:" &&
-			allowedHosts.has(host) &&
-			u.pathname === "/mcp" &&
-			u.search === "?login"
+			allowedHosts.has(host)
 		);
 	} catch {
 		return false;

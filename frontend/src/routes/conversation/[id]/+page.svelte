@@ -222,13 +222,13 @@
 				// Use direct agent API (simplified, no backend)
 				messageUpdatesIterator = sendAgentMessage(
 					prompt,
-					page.params.id,
+					page.params.id!,
 					messageUpdatesAbortController.signal
 				);
 			} else {
 				// Use existing backend flow
 				messageUpdatesIterator = await fetchMessageUpdates(
-					page.params.id,
+					page.params.id!,
 					{
 						base,
 						inputs: prompt,
@@ -373,7 +373,7 @@
 
 						$titleUpdate = {
 							title: update.title,
-							convId: page.params.id,
+							convId: page.params.id!,
 						};
 					}
 				} else if (update.type === MessageUpdateType.File) {
@@ -436,7 +436,7 @@
 
 		const streaming = isConversationStreaming(messages);
 		if (streaming) {
-			addBackgroundGeneration({ id: page.params.id, startedAt: Date.now() });
+			addBackgroundGeneration({ id: page.params.id!, startedAt: Date.now() });
 			$loading = true;
 		}
 	});
@@ -492,7 +492,7 @@
 		}
 
 		if (!streaming && browser) {
-			removeBackgroundGeneration(page.params.id);
+			removeBackgroundGeneration(page.params.id!);
 		}
 	});
 

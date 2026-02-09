@@ -13,11 +13,9 @@ import type {
 	MessageSendParams, 
 	BinduJsonRpcRequest,
 	Task,
-	PaymentSessionResponse,
-	PaymentStatusResponse,
 	TaskState
 } from "./types";
-import { TERMINAL_STATES, NON_TERMINAL_STATES, WORKING_STATES } from "./types";
+import { TERMINAL_STATES, NON_TERMINAL_STATES } from "./types";
 
 export const endpointBinduParametersSchema = z.object({
 	type: z.literal("bindu"),
@@ -26,6 +24,56 @@ export const endpointBinduParametersSchema = z.object({
 	paymentToken: z.string().optional().default(""),
 	streamingSupported: z.boolean().default(true),
 });
+
+/**
+ * Helper to build headers with auth and payment tokens
+ * Matches legacy app.js pattern for getAuthHeaders() and getPaymentHeaders()
+ */
+function buildHeaders(apiKey: string, paymentToken?: string): Record<string, string> {
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+
+	if (apiKey) {
+		headers["Authorization"] = `Bearer ${apiKey}`;
+	}
+
+	if (paymentToken) {
+		// Ensure payment token is properly encoded (ASCII only)
+		const cleanToken = paymentToken.trim();
+		// eslint-disable-next-line no-control-regex
+		if (/^[\x00-\x7F]*$/.test(cleanToken)) {
+			headers["X-PAYMENT"] = cleanToken;
+		}
+	}
+
+	return headers;
+}
+
+/**
+ * Determine task ID based on A2A protocol state machine:
+ * - Non-terminal states (input-required, auth-required): REUSE same task ID
+ * - Terminal states (completed, failed, canceled): CREATE new task with referenceTaskIds
+ * - No current task: CREATE new task
+ * Matches legacy app.js task ID logic in sendMessage()
+ */
+function determineTaskIdAndReferences(
+	lastTaskId?: string,
+	lastTaskState?: TaskState
+): { taskId: string; referenceTaskIds?: string[] } {
+	const isNonTerminalState = lastTaskState && NON_TERMINAL_STATES.includes(lastTaskState);
+
+	if (isNonTerminalState && lastTaskId) {
+		// Continue same task for non-terminal states
+		return { taskId: lastTaskId };
+	} else if (lastTaskId) {
+		// Terminal state or no state - create new task, reference previous
+		return { taskId: crypto.randomUUID(), referenceTaskIds: [lastTaskId] };
+	} else {
+		// First message in conversation
+		return { taskId: crypto.randomUUID() };
+	}
+}
 
 /**
  * Convert chat-ui message format to Bindu message parts
@@ -98,10 +146,11 @@ function buildMessageHistory(
 export async function endpointBindu(
 	input: z.input<typeof endpointBinduParametersSchema>
 ): Promise<Endpoint> {
-	const { baseURL, apiKey, streamingSupported } = endpointBinduParametersSchema.parse(input);
+	const { baseURL, apiKey, paymentToken, streamingSupported } = endpointBinduParametersSchema.parse(input);
 
 	// Use configured API key or fall back to environment variable
 	const effectiveApiKey = apiKey || config.BINDU_API_KEY || "";
+	let currentPaymentToken = paymentToken || "";
 
 	return async ({ messages, conversationId, preprompt, abortSignal }) => {
 		// Filter to get actual user/assistant messages
@@ -118,13 +167,21 @@ export async function endpointBindu(
 		const contextId = conversationId 
 			? conversationId.toString().padEnd(32, '0')  // Pad to 32 chars for UUID format
 			: crypto.randomUUID();
-		const taskId = crypto.randomUUID();
 
-		// Build message with history
-		const { lastMessage } = buildMessageHistory(conversationMessages, contextId);
+		// Build message with history and track task state
+		const { lastMessage, lastTaskId, lastTaskState } = buildMessageHistory(conversationMessages, contextId);
+
+		// Determine task ID based on A2A protocol state machine
+		const { taskId, referenceTaskIds } = determineTaskIdAndReferences(
+			lastTaskId,
+			lastTaskState as TaskState | undefined
+		);
 
 		// Override taskId for the actual request
 		lastMessage.taskId = taskId;
+		if (referenceTaskIds && referenceTaskIds.length > 0) {
+			lastMessage.referenceTaskIds = referenceTaskIds;
+		}
 
 		// Prepare system prompt as part of configuration if present
 		const systemContext = preprompt?.trim()
@@ -149,14 +206,8 @@ export async function endpointBindu(
 			id: crypto.randomUUID(),
 		};
 
-		// Build headers
-		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
-		};
-
-		if (effectiveApiKey) {
-			headers["Authorization"] = `Bearer ${effectiveApiKey}`;
-		}
+		// Build headers with auth and payment tokens
+		let headers = buildHeaders(effectiveApiKey, currentPaymentToken);
 
 		// Step 1: Send message (returns task immediately)
 		const messageResponse = await fetch(baseURL, {
@@ -165,6 +216,22 @@ export async function endpointBindu(
 			body: JSON.stringify(messageRequest),
 			signal: abortSignal,
 		});
+
+		// Handle 401 Unauthorized (Auth Required)
+		if (messageResponse.status === 401) {
+			throw new Error(
+				"Authentication required. Please provide a valid API key or JWT token."
+			);
+		}
+
+		// Handle 402 Payment Required
+		if (messageResponse.status === 402) {
+			// In server-side context, we cannot handle payment UI flow
+			// This should be handled by the client/frontend
+			throw new Error(
+				"Payment required. This agent requires payment to process requests. Please configure a payment token."
+			);
+		}
 
 		if (!messageResponse.ok) {
 			const errorText = await messageResponse.text().catch(() => "Unknown error");
@@ -194,7 +261,7 @@ export async function endpointBindu(
 				throw new Error("Request aborted");
 			}
 
-			// Wait before polling
+			// Wait before polling (skip first attempt)
 			if (attempt > 0) {
 				await new Promise(resolve => setTimeout(resolve, pollInterval));
 			}
@@ -206,6 +273,9 @@ export async function endpointBindu(
 				params: { taskId: submittedTaskId },
 				id: crypto.randomUUID(),
 			};
+
+			// Rebuild headers in case payment token was added
+			headers = buildHeaders(effectiveApiKey, currentPaymentToken);
 
 			const statusResponse = await fetch(baseURL, {
 				method: "POST",
@@ -225,26 +295,48 @@ export async function endpointBindu(
 			}
 
 			// Result IS the task directly
-			const task = statusResult.result;
+			const task: Task = statusResult.result;
 			if (!task || !task.status) {
 				continue; // Task not ready yet
 			}
 
 			const taskState = task.status.state;
 			
-			// Check if task is complete
-			if (taskState === "completed" || taskState === "input-required") {
-				// Convert the completed task result to a stream
-				// Create a mock Response with the JSON result
+			// Terminal states - task is IMMUTABLE
+			if (TERMINAL_STATES.includes(taskState)) {
+				// Clear payment token when task reaches terminal state
+				// Next message will create NEW task and require NEW payment
+				currentPaymentToken = "";
+
+				if (taskState === "completed" || taskState === "input-required") {
+					// Convert the completed task result to a stream
+					const mockResponse = new Response(JSON.stringify(statusResult), {
+						status: 200,
+						headers: { 'Content-Type': 'application/json' }
+					});
+					return binduResponseToStream(mockResponse);
+				} else if (taskState === "failed") {
+					const errorMsg = task.metadata?.error || 
+						task.metadata?.error_message || 
+						task.status?.message || 
+						"Task failed";
+					throw new Error(`Task failed: ${errorMsg}`);
+				} else if (taskState === "canceled") {
+					throw new Error("Task was canceled");
+				}
+			}
+			// Non-terminal states - task still MUTABLE, waiting for input
+			else if (NON_TERMINAL_STATES.includes(taskState)) {
+				// Return current state (input-required, auth-required)
+				// Next message will REUSE same task ID
 				const mockResponse = new Response(JSON.stringify(statusResult), {
 					status: 200,
 					headers: { 'Content-Type': 'application/json' }
 				});
 				return binduResponseToStream(mockResponse);
-			} else if (taskState === "failed" || taskState === "canceled") {
-				throw new Error(`Task ${taskState}: ${task.status?.message || "Unknown error"}`);
 			}
-			// Otherwise continue polling (working, submitted, etc.)
+			// Working states - continue polling (submitted, working)
+			// Continue to next iteration
 		}
 
 		throw new Error("Task polling timeout - task did not complete in time");

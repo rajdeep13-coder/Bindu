@@ -1,6 +1,5 @@
 import { authCondition } from "$lib/server/auth";
 import { collections } from "$lib/server/database";
-import { config } from "$lib/server/config";
 import { models, validModelIdSchema } from "$lib/server/models";
 import { ERROR_MESSAGES } from "$lib/stores/errors";
 import type { Message } from "$lib/types/Message";
@@ -21,8 +20,6 @@ import { buildSubtree } from "$lib/utils/tree/buildSubtree.js";
 import { addChildren } from "$lib/utils/tree/addChildren.js";
 import { addSibling } from "$lib/utils/tree/addSibling.js";
 import { usageLimits } from "$lib/server/usageLimits";
-import { textGeneration } from "$lib/server/textGeneration";
-import type { TextGenerationContext } from "$lib/server/textGeneration/types";
 import { logger } from "$lib/server/logger.js";
 import { AbortRegistry } from "$lib/server/abortRegistry";
 import { MetricsServer } from "$lib/server/metrics";
@@ -127,8 +124,6 @@ export async function POST({ request, locals, params, getClientAddress }) {
 		inputs: newPrompt,
 		id: messageId,
 		is_retry: isRetry,
-		selectedMcpServerNames,
-		selectedMcpServers,
 	} = z
 		.object({
 			id: z.string().uuid().refine(isMessageId).optional(), // parent message id to append to for a normal message, or the message id for a retry/continue
@@ -139,20 +134,6 @@ export async function POST({ request, locals, params, getClientAddress }) {
 					.transform((s) => s.replace(/\r\n/g, "\n"))
 			),
 			is_retry: z.optional(z.boolean()),
-			selectedMcpServerNames: z.optional(z.array(z.string())),
-			selectedMcpServers: z
-				.optional(
-					z.array(
-						z.object({
-							name: z.string(),
-							url: z.string(),
-							headers: z
-								.optional(z.array(z.object({ key: z.string(), value: z.string() })))
-								.default([]),
-						})
-					)
-				)
-				.default([]),
 			files: z.optional(
 				z.array(
 					z.object({
@@ -165,23 +146,6 @@ export async function POST({ request, locals, params, getClientAddress }) {
 			),
 		})
 		.parse(JSON.parse(json));
-
-	// Attach MCP selection to locals so the text generation pipeline can consume it
-	try {
-		(locals as unknown as Record<string, unknown>).mcp = {
-			selectedServerNames: selectedMcpServerNames,
-			selectedServers: (selectedMcpServers ?? []).map((s) => ({
-				name: s.name,
-				url: s.url,
-				headers:
-					s.headers && s.headers.length > 0
-						? Object.fromEntries(s.headers.map((h) => [h.key, h.value]))
-						: undefined,
-			})),
-		};
-	} catch {
-		// ignore attachment errors, pipeline will just use env servers
-	}
 
 	const inputFiles = await Promise.all(
 		form
@@ -544,29 +508,43 @@ export async function POST({ request, locals, params, getClientAddress }) {
 				// Add billing organization to locals for the endpoint to use
 				locals.billingOrganization = userSettings?.billingOrganization;
 
-				const ctx: TextGenerationContext = {
-					model,
-					endpoint: await model.getEndpoint(),
-					conv,
+				// Get the endpoint directly and call it
+				const endpoint = await model.getEndpoint();
+				const stream = await endpoint({
 					messages: messagesForPrompt,
-					assistant: undefined,
-					promptedAt,
-					ip: getClientAddress(),
-					username: locals.user?.username,
-					// Force-enable multimodal if user settings say so for this model
-					forceMultimodal: Boolean(userSettings?.multimodalOverrides?.[model.id]),
-					// Force-enable tools if user settings say so for this model
-					forceTools: Boolean(userSettings?.toolsOverrides?.[model.id]),
-					// Inference provider preference (HuggingChat only, skip for router models)
-					provider:
-						config.isHuggingChat && !model.isRouter
-							? userSettings?.providerOverrides?.[model.id]
-							: undefined,
+					preprompt: conv.preprompt,
+					conversationId: convId,
 					locals,
-					abortController: ctrl,
-				};
-				// run the text generation and send updates to the client
-				for await (const event of textGeneration(ctx)) await update(event);
+					abortSignal: ctrl.signal,
+				});
+
+				// Process the stream and send updates to the client
+				for await (const event of stream) {
+					// Convert TextGenerationStreamOutput to MessageUpdate
+					if (event.token?.text) {
+						await update({
+							type: MessageUpdateType.Stream,
+							token: event.token.text,
+						});
+					}
+					// Only send FinalAnswer if we have actual text content
+					if (event.generated_text !== null && event.generated_text !== undefined && event.generated_text !== "") {
+						await update({
+							type: MessageUpdateType.FinalAnswer,
+							text: event.generated_text,
+							interrupted: false,
+						});
+					}
+					// Forward router metadata if present
+					if (event.routerMetadata) {
+						await update({
+							type: MessageUpdateType.RouterMetadata,
+							route: event.routerMetadata.route || "",
+							model: event.routerMetadata.model || "",
+							provider: event.routerMetadata.provider,
+						});
+					}
+				}
 				if (ctrl.signal.aborted) {
 					abortedByUser = true;
 				}
