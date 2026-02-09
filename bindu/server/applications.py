@@ -69,6 +69,7 @@ class BinduApplication(Starlette):
         auth_enabled: bool = False,
         telemetry_config: TelemetryConfig | None = None,
         sentry_config: SentryConfig | None = None,
+        cors_origins: list[str] | None = None,
     ):
         """Initialize Bindu application.
 
@@ -118,6 +119,7 @@ class BinduApplication(Starlette):
             payment_requirements_for_middleware,
             manifest,
             auth_enabled,
+            cors_origins,
         )
 
         super().__init__(
@@ -533,8 +535,9 @@ class BinduApplication(Starlette):
         payment_requirements: list[Any] | None,
         manifest: AgentManifest,
         auth_enabled: bool,
+        cors_origins: list[str] | None = None,
     ) -> list[Middleware]:
-        """Set up middleware chain with X402 and Hydra middleware.
+        """Set up middleware chain with CORS, X402 and Hydra middleware.
 
         Args:
             middleware: Custom middleware to include
@@ -542,11 +545,29 @@ class BinduApplication(Starlette):
             payment_requirements: Payment requirements for X402
             manifest: Agent manifest
             auth_enabled: Whether authentication is enabled
+            cors_origins: List of allowed CORS origins
 
         Returns:
             List of configured middleware
         """
         middleware_list = list(middleware) if middleware else []
+
+        # Add CORS middleware if origins are specified
+        if cors_origins:
+            from starlette.middleware.cors import CORSMiddleware
+            
+            logger.info(f"CORS middleware enabled for origins: {cors_origins}")
+            cors_middleware = Middleware(
+                CORSMiddleware,
+                allow_origins=cors_origins,
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+                expose_headers=["*"],
+            )
+            # CORS must be first in middleware chain
+            middleware_list.insert(0, cors_middleware)
+            logger.info("CORS middleware added to position 0 in middleware chain")
 
         # Add X402 middleware if configured
         if x402_ext and payment_requirements:
@@ -565,13 +586,13 @@ class BinduApplication(Starlette):
                 x402_ext=x402_ext,
                 payment_requirements=payment_requirements,
             )
-            middleware_list.insert(0, x402_middleware)
+            middleware_list.append(x402_middleware)
 
         # Add authentication middleware if enabled
         if auth_enabled and app_settings.auth.enabled:
             auth_middleware = self._create_auth_middleware()
-            # Add auth middleware after X402 (if present)
-            middleware_list.insert(1 if x402_ext else 0, auth_middleware)
+            # Add auth middleware after CORS and X402
+            middleware_list.append(auth_middleware)
 
         # Add metrics middleware (should be last to capture all requests)
         from .middleware import MetricsMiddleware

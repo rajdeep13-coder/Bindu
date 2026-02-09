@@ -371,6 +371,7 @@ def bindufy(
         storage_config=storage_config,
         scheduler_config=scheduler_config,
         sentry_config=sentry_config,
+        cors_origins=deployment_config.cors_origins if deployment_config else None,
     )
 
     # Parse deployment URL

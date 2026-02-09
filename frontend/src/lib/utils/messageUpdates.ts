@@ -276,3 +276,21 @@ const waitForEvent = (eventTarget: EventTarget, eventName: string) =>
 	new Promise<boolean>((resolve) =>
 		eventTarget.addEventListener(eventName, () => resolve(true), { once: true })
 	);
+
+/**
+ * Fetch message updates from agent API instead of backend
+ * Compatible interface with fetchMessageUpdates
+ */
+export async function fetchAgentMessageUpdates(
+	contextId: string | undefined,
+	opts: { inputs?: string },
+	abortSignal: AbortSignal
+): Promise<AsyncGenerator<MessageUpdate>> {
+	const { agentAPI } = await import('$lib/services/agent-api');
+	
+	return agentAPI.sendMessageStream(
+		opts.inputs || '',
+		contextId,
+		abortSignal
+	) as AsyncGenerator<MessageUpdate>;
+}

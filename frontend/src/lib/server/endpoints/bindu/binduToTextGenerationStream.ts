@@ -13,14 +13,25 @@ import type {
 
 /**
  * Extract text content from a task's artifacts
+ * Matches legacy UI pattern: artifacts[].parts[].text
  */
 function extractTextFromArtifacts(artifacts?: Artifact[]): string {
 	if (!artifacts || artifacts.length === 0) return "";
 
 	const textParts: string[] = [];
 	for (const artifact of artifacts) {
+		// Check for direct text field (simple format)
 		if (artifact.kind === "text" && artifact.text) {
 			textParts.push(artifact.text);
+		}
+		// Check for parts array (A2A protocol format)
+		else if ('parts' in artifact && Array.isArray((artifact as any).parts)) {
+			const parts = (artifact as any).parts;
+			for (const part of parts) {
+				if (part.kind === 'text' && part.text) {
+					textParts.push(part.text);
+				}
+			}
 		}
 	}
 	return textParts.join("");
@@ -36,12 +47,47 @@ export async function* binduToTextGenerationStream(
 		throw new Error(`Bindu error ${response.error.code}: ${response.error.message}`);
 	}
 
-	const task = response.result?.task;
-	if (!task) {
-		throw new Error("No task in Bindu response");
+	let text = "";
+	
+	// Result IS the task directly (not result.task)
+	const task = response.result;
+	
+	// Try to extract from artifacts first (completed tasks)
+	if (task && Array.isArray(task.artifacts) && task.artifacts.length > 0) {
+		text = extractTextFromArtifacts(task.artifacts);
 	}
-
-	const text = extractTextFromArtifacts(task.artifacts);
+	
+	// If no artifacts, check history for assistant messages (input-required, etc.)
+	if (!text && task && Array.isArray(task.history)) {
+		// Get the last assistant/agent message from history
+		for (let i = task.history.length - 1; i >= 0; i--) {
+			const msg = task.history[i];
+			if (msg.role === 'assistant' || msg.role === 'agent') {
+				if (Array.isArray(msg.parts)) {
+					for (const part of msg.parts) {
+						if (part.kind === 'text' && part.text) {
+							text = part.text;
+							break;
+						}
+					}
+				}
+				if (text) break;
+			}
+		}
+	}
+	
+	// Fallback: check for simple response format
+	if (!text && response.result && 'response' in response.result) {
+		text = String(response.result.response || "");
+	}
+	// Fallback: check for message in result
+	if (!text && response.result && 'message' in response.result) {
+		text = String(response.result.message || "");
+	}
+	
+	if (!text) {
+		throw new Error("No text content in Bindu response");
+	}
 
 	// Emit as final answer
 	yield {

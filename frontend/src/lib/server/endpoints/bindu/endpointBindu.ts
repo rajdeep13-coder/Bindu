@@ -7,12 +7,23 @@ import { z } from "zod";
 import { config } from "$lib/server/config";
 import type { Endpoint, EndpointMessage } from "../endpoints";
 import { binduResponseToStream } from "./binduToTextGenerationStream";
-import type { BinduMessage, Part, MessageSendParams, BinduJsonRpcRequest } from "./types";
+import type { 
+	BinduMessage, 
+	Part, 
+	MessageSendParams, 
+	BinduJsonRpcRequest,
+	Task,
+	PaymentSessionResponse,
+	PaymentStatusResponse,
+	TaskState
+} from "./types";
+import { TERMINAL_STATES, NON_TERMINAL_STATES, WORKING_STATES } from "./types";
 
 export const endpointBinduParametersSchema = z.object({
 	type: z.literal("bindu"),
 	baseURL: z.string().url(),
 	apiKey: z.string().optional().default(""),
+	paymentToken: z.string().optional().default(""),
 	streamingSupported: z.boolean().default(true),
 });
 
@@ -48,28 +59,37 @@ function messageContentToParts(message: EndpointMessage): Part[] {
 
 /**
  * Build the complete message history for context
+ * Tracks task IDs and states for proper task continuity
  */
 function buildMessageHistory(
 	messages: EndpointMessage[],
 	contextId: string
-): { lastMessage: BinduMessage; history: BinduMessage[] } {
+): { lastMessage: BinduMessage; history: BinduMessage[]; lastTaskId?: string; lastTaskState?: string } {
 	const history: BinduMessage[] = [];
+	let lastTaskId: string | undefined;
+	let lastTaskState: string | undefined;
 
 	for (let i = 0; i < messages.length; i++) {
 		const msg = messages[i];
+		const taskId = crypto.randomUUID();
 		const binduMsg: BinduMessage = {
 			role: msg.from === "assistant" ? "agent" : "user",
 			parts: messageContentToParts(msg),
 			kind: "message",
 			messageId: crypto.randomUUID(),
 			contextId,
-			taskId: crypto.randomUUID(),
+			taskId,
 		};
 		history.push(binduMsg);
+		
+		// Track last user message's task ID for continuity
+		if (msg.from === "user") {
+			lastTaskId = taskId;
+		}
 	}
 
 	const lastMessage = history[history.length - 1];
-	return { lastMessage, history: history.slice(0, -1) };
+	return { lastMessage, history: history.slice(0, -1), lastTaskId, lastTaskState };
 }
 
 /**
@@ -94,7 +114,10 @@ export async function endpointBindu(
 		}
 
 		// Use conversation ID as context ID for continuity
-		const contextId = conversationId?.toString() || crypto.randomUUID();
+		// Convert MongoDB ObjectId (24 chars) to UUID format (32 chars hex)
+		const contextId = conversationId 
+			? conversationId.toString().padEnd(32, '0')  // Pad to 32 chars for UUID format
+			: crypto.randomUUID();
 		const taskId = crypto.randomUUID();
 
 		// Build message with history
@@ -113,17 +136,15 @@ export async function endpointBindu(
 			message: lastMessage,
 			configuration: {
 				acceptedOutputModes: ["text/plain", "application/json"],
-				blocking: !streamingSupported,
+				blocking: false,  // Use async task pattern
 				...systemContext,
 			},
 		};
 
-		// Choose streaming or non-streaming method
-		const method = streamingSupported ? "message/stream" : "message/send";
-
-		const binduRequest: BinduJsonRpcRequest = {
+		// Step 1: Send message (returns task immediately)
+		const messageRequest: BinduJsonRpcRequest = {
 			jsonrpc: "2.0",
-			method,
+			method: "message/send",
 			params: params as unknown as Record<string, unknown>,
 			id: crypto.randomUUID(),
 		};
@@ -137,27 +158,95 @@ export async function endpointBindu(
 			headers["Authorization"] = `Bearer ${effectiveApiKey}`;
 		}
 
-		// Add streaming header if applicable
-		if (streamingSupported) {
-			headers["Accept"] = "text/event-stream";
-		}
-
-		// Make the request
-		const response = await fetch(baseURL, {
+		// Step 1: Send message (returns task immediately)
+		const messageResponse = await fetch(baseURL, {
 			method: "POST",
 			headers,
-			body: JSON.stringify(binduRequest),
+			body: JSON.stringify(messageRequest),
 			signal: abortSignal,
 		});
 
-		if (!response.ok) {
-			const errorText = await response.text().catch(() => "Unknown error");
+		if (!messageResponse.ok) {
+			const errorText = await messageResponse.text().catch(() => "Unknown error");
 			throw new Error(
-				`Bindu request failed: ${response.status} ${response.statusText} - ${errorText}`
+				`Message send failed: ${messageResponse.status} ${messageResponse.statusText} - ${errorText}`
 			);
 		}
 
-		// Convert response to text generation stream
-		return binduResponseToStream(response);
+		const messageResult = await messageResponse.json();
+		if (messageResult.error) {
+			throw new Error(`Message send error: ${messageResult.error.message}`);
+		}
+
+		// Extract task from result - result IS the task directly
+		const initialTask = messageResult.result;
+		if (!initialTask || !initialTask.id) {
+			throw new Error("No task returned from message/send");
+		}
+		const submittedTaskId = initialTask.id;
+
+		// Step 2: Poll for task completion
+		const pollInterval = 1000; // Poll every 1 second (matches legacy UI)
+		const maxAttempts = 300; // Max 5 minutes (300 * 1000ms)
+		
+		for (let attempt = 0; attempt < maxAttempts; attempt++) {
+			if (abortSignal?.aborted) {
+				throw new Error("Request aborted");
+			}
+
+			// Wait before polling
+			if (attempt > 0) {
+				await new Promise(resolve => setTimeout(resolve, pollInterval));
+			}
+
+			// Get task status
+			const statusRequest: BinduJsonRpcRequest = {
+				jsonrpc: "2.0",
+				method: "tasks/get",
+				params: { taskId: submittedTaskId },
+				id: crypto.randomUUID(),
+			};
+
+			const statusResponse = await fetch(baseURL, {
+				method: "POST",
+				headers,
+				body: JSON.stringify(statusRequest),
+				signal: abortSignal,
+			});
+
+			if (!statusResponse.ok) {
+				continue; // Retry on error
+			}
+
+			const statusResult = await statusResponse.json();
+			
+			if (statusResult.error) {
+				throw new Error(`Task status error: ${statusResult.error.message}`);
+			}
+
+			// Result IS the task directly
+			const task = statusResult.result;
+			if (!task || !task.status) {
+				continue; // Task not ready yet
+			}
+
+			const taskState = task.status.state;
+			
+			// Check if task is complete
+			if (taskState === "completed" || taskState === "input-required") {
+				// Convert the completed task result to a stream
+				// Create a mock Response with the JSON result
+				const mockResponse = new Response(JSON.stringify(statusResult), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				});
+				return binduResponseToStream(mockResponse);
+			} else if (taskState === "failed" || taskState === "canceled") {
+				throw new Error(`Task ${taskState}: ${task.status?.message || "Unknown error"}`);
+			}
+			// Otherwise continue polling (working, submitted, etc.)
+		}
+
+		throw new Error("Task polling timeout - task did not complete in time");
 	};
 }

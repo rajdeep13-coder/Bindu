@@ -38,6 +38,7 @@ export interface BinduMessage {
 	messageId: string;
 	contextId: string;
 	taskId: string;
+	referenceTaskIds?: string[]; // For task continuity (A2A protocol)
 }
 
 // ============================================================================
@@ -48,6 +49,7 @@ export type TaskState =
 	| "submitted"
 	| "working"
 	| "input-required"
+	| "auth-required"
 	| "completed"
 	| "canceled"
 	| "failed"
@@ -71,8 +73,10 @@ export interface Artifact {
 }
 
 export interface Task {
-	taskId: string;
-	contextId: string;
+	id: string; // Primary task ID field
+	taskId?: string; // Alias for compatibility
+	context_id?: string; // Server uses snake_case
+	contextId?: string; // Alias for compatibility
 	status: TaskStatus;
 	artifacts?: Artifact[];
 	history?: BinduMessage[];
@@ -110,6 +114,7 @@ export interface MessageSendParams {
 		acceptedOutputModes?: string[];
 		blocking?: boolean;
 		historyLength?: number;
+		systemPrompt?: string;
 		pushNotificationConfig?: {
 			url: string;
 			token?: string;
@@ -192,4 +197,29 @@ export interface BinduEndpointConfig {
 	type: "bindu";
 	baseURL: string;
 	apiKey?: string;
+	paymentToken?: string;
 }
+
+// ============================================================================
+// Payment & Auth Types
+// ============================================================================
+
+export interface PaymentSessionResponse {
+	session_id: string;
+	browser_url: string;
+}
+
+export interface PaymentStatusResponse {
+	status: "pending" | "completed" | "failed";
+	payment_token?: string;
+	error?: string;
+}
+
+// Terminal states: task is IMMUTABLE, next message creates NEW task
+export const TERMINAL_STATES: TaskState[] = ["completed", "failed", "canceled"];
+
+// Non-terminal states: task is MUTABLE, can continue with SAME task ID
+export const NON_TERMINAL_STATES: TaskState[] = ["input-required", "auth-required"];
+
+// Working states: task is in progress
+export const WORKING_STATES: TaskState[] = ["submitted", "working"];

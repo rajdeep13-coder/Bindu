@@ -15,9 +15,9 @@
 	import { addChildren } from "$lib/utils/tree/addChildren";
 	import { addSibling } from "$lib/utils/tree/addSibling";
 	import { fetchMessageUpdates } from "$lib/utils/messageUpdates";
+	import { sendAgentMessage } from "$lib/utils/agentMessageHandler";
 	import type { v4 } from "uuid";
 	import { useSettingsStore } from "$lib/stores/settings.js";
-	import { enabledServers } from "$lib/stores/mcpServers";
 	import { browser } from "$app/environment";
 	import {
 		addBackgroundGeneration,
@@ -212,25 +212,36 @@
 
 			const messageUpdatesAbortController = new AbortController();
 
-			const messageUpdatesIterator = await fetchMessageUpdates(
-				page.params.id,
-				{
-					base,
-					inputs: prompt,
-					messageId,
-					isRetry,
-					files: isRetry ? userMessage?.files : base64Files,
-					selectedMcpServerNames: $enabledServers.map((s) => s.name),
-					selectedMcpServers: $enabledServers.map((s) => ({
-						name: s.name,
-						url: s.url,
-						headers: s.headers,
-					})),
-				},
-				messageUpdatesAbortController.signal
-			).catch((err) => {
-				error.set(err.message);
-			});
+			// Check if using Bindu agent model - use direct API
+			const currentModel = findCurrentModel(data.models, data.oldModels, data.model);
+			const useDirectAgentAPI = currentModel?.id === 'bindu' || currentModel?.name === 'bindu';
+
+			let messageUpdatesIterator;
+			
+			if (useDirectAgentAPI) {
+				// Use direct agent API (simplified, no backend)
+				messageUpdatesIterator = sendAgentMessage(
+					prompt,
+					page.params.id,
+					messageUpdatesAbortController.signal
+				);
+			} else {
+				// Use existing backend flow
+				messageUpdatesIterator = await fetchMessageUpdates(
+					page.params.id,
+					{
+						base,
+						inputs: prompt,
+						messageId,
+						isRetry,
+						files: isRetry ? userMessage?.files : base64Files,
+					},
+					messageUpdatesAbortController.signal
+				).catch((err) => {
+					error.set(err.message);
+				});
+			}
+			
 			if (messageUpdatesIterator === undefined) return;
 
 			files = [];

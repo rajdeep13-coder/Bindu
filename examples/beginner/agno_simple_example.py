@@ -31,7 +31,11 @@ config = {
     "author": "your.email@example.com",
     "name": "research_agent",
     "description": "A research assistant agent",
-    "deployment": {"url": "http://localhost:3773", "expose": True},
+    "deployment": {
+        "url": "http://localhost:3773",
+        "expose": True,
+        "cors_origins": ["http://localhost:5173"]
+    },
     "skills": ["skills/question-answering", "skills/pdf-processing"],
 }
 
@@ -51,4 +55,8 @@ def handler(messages: list[dict[str, str]]):
 
 
 # Bindu-fy it
-bindufy(config, handler)
+if __name__ == "__main__":
+    # Disable auth for local development - frontend can connect without OAuth
+    import os
+    os.environ["AUTH_ENABLED"] = "false"
+    bindufy(config, handler)
