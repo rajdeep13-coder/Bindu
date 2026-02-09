@@ -18,14 +18,17 @@ uv run examples/<example_name>.py
 
 ## Available Examples
 
-### 1. Basic Agents
-These examples demonstrate the fundamental concepts of Bindu.
+### 1. Beginner Agents
+These examples are perfect for learning Bindu fundamentals and getting started quickly.
 
 | File | Description | Key Features |
 |------|-------------|--------------|
-| `echo_agent.py` | A minimal agent that repeats what you say. | Basics of `bindufy`, minimal config |
-| `echo_simple_agent.py` | An even simpler version of the echo agent. | Ultra-minimal config |
-| `summarizer_agent.py` | Summarizes text into 2-3 sentences using GPT-4. | Agno integration, LLM usage |
+| `echo_simple_agent.py` | Minimal agent that echoes user input for testing. | Ultra-minimal config, no dependencies |
+| `beginner_zero_config_agent.py` | Zero-config agent for first-time users. | Simple setup, web search, friendly responses |
+| `agno_simple_example.py` | Entertainment agent that tells jokes and witty responses. | Humor generation, topic-specific jokes |
+| `agno_example.py` | Research assistant with web search capabilities. | DuckDuckGo integration, comprehensive research |
+| `faq_agent.py` | Documentation agent that searches Bindu docs. | Web search, markdown responses, source citations |
+| `agno_notion_agent.py` | Notion integration for content management. | Page creation, database search |
 
 ### 2. Framework Integrations
 Bindu works seamlessly with other agent frameworks like Agno.
@@ -131,10 +134,12 @@ See individual skill directories for documentation.
 
 ## Next Steps
 
-1. **Start Simple**: Run `echo_agent.py` to verify your setup
-2. **Add Intelligence**: Try `summarizer_agent.py` with your OpenAI key
-3. **Enable Payments**: Explore `premium_advisor.py` for monetization
-4. **Add Authentication**: Use `agno_example.py` for production-ready security
-5. **Build Custom**: Copy any example and modify for your use case
+1. **Start Simple**: Run `echo_simple_agent.py` to verify your setup
+2. **Zero Config**: Try `beginner_zero_config_agent.py` for instant functionality
+3. **Add Intelligence**: Use `agno_example.py` for research capabilities
+4. **Have Fun**: Try `agno_simple_example.py` for entertainment
+5. **Learn Bindu**: Use `faq_agent.py` to explore documentation
+6. **Integrate Tools**: Explore `agno_notion_agent.py` for external services
+7. **Build Custom**: Copy any example and modify for your use case
 
 For more details, see the [main documentation](../README.md).

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from bindu.penguin.bindufy import bindufy
-from agno.agent import Agent, RunResponse
+from agno.agent import Agent
 from agno.models.openrouter import OpenRouter
 from agno.tools.duckduckgo import DuckDuckGoTools
 
@@ -43,35 +43,17 @@ agent = Agent(
 # ---------------------------------------------------------------------------
 # Handler (FIXED)
 # ---------------------------------------------------------------------------
-def handler(data):
+def handler(messages: list[dict[str, str]]):
+    """Process messages and return agent response.
+
+    Args:
+        messages: List of message dictionaries containing conversation history
+
+    Returns:
+        Agent response result
     """
-    1. Parses input from Bindu (handles dict or string).
-    2. Runs the Agno agent.
-    3. Returns ONLY the content string (removes technical metadata).
-    """
-    print(f"Incoming Data: {data}")
-    
-    # --- Step 1: Clean Input ---
-    # Bindu might send a dict like {'content': '...'} or a direct string
-    user_query = ""
-    if isinstance(data, dict):
-        # Try to find the message content in common fields
-        user_query = data.get("content") or data.get("message") or str(data)
-    else:
-        user_query = str(data)
-
-    # --- Step 2: Get Response ---
-    # agent.run returns a RunResponse object, NOT a string
-    response: RunResponse = agent.run(user_query)
-
-    # --- Step 3: Format Output ---
-    # We extract strictly the .content attribute
-    if response and hasattr(response, 'content'):
-        return response.content
-    
-    # Fallback if something goes wrong
-    return "Error: No content received from the agent."
-
+    result = agent.run(input=messages)
+    return result
 # ---------------------------------------------------------------------------
 # Bindu config
 # ---------------------------------------------------------------------------
@@ -80,7 +62,7 @@ config = {
     "name": "bindu_docs_agent",
     "description": "Answers questions about Bindu documentation",
     "deployment": {"url": "http://localhost:3773", "expose": True},
-    "skills": [],
+    "skills": ["skills/question-answering", "skills/pdf-processing"],
 }
 
 # Run the Bindu wrapper

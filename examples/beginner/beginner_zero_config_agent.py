@@ -38,7 +38,7 @@ config = {
         "url": "http://localhost:3774",
         "expose": True,
     },
-    "skills": [],
+    "skills": ["skills/question-answering", "skills/pdf-processing"],
 }
 
 def handler(messages):
