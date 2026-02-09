@@ -21,6 +21,7 @@
 		browser ? parseInt(localStorage.getItem("bindu_oauth_expiry") || "0") : null
 	);
 	let clientSecret = $state("");
+	let scope = $state("openid offline agent:read agent:write");
 	let authStatus = $state<"idle" | "loading" | "authenticated" | "error">("idle");
 	let authError = $state<string | null>(null);
 	let authRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,7 +56,7 @@
 					grant_type: "client_credentials",
 					client_id: didId,
 					client_secret: clientSecret,
-					scope: "openid offline agent:read agent:write",
+					scope: scope.trim(),
 				}),
 			});
 
@@ -138,23 +139,64 @@
 		const diff = authTokenExpiry - now;
 		if (diff <= 0) return "Expired";
 		const minutes = Math.floor(diff / 60000);
-		return `${minutes} min`;
+		const seconds = Math.floor((diff % 60000) / 1000);
+		return `${minutes}m ${seconds}s`;
 	}
 
-	onMount(async () => {
-		// Fetch agent card for DID
-		try {
-			const res = await fetch("/api/agent-card");
-			if (res.ok) {
-				agentCard = await res.json();
-			} else {
-				agentError = "Could not load agent info";
+	function getExpirationTime(): string {
+		if (!authTokenExpiry) return "";
+		const expiryDate = new Date(authTokenExpiry);
+		return expiryDate.toLocaleTimeString([], { 
+			hour: '2-digit', 
+			minute: '2-digit',
+			second: '2-digit',
+			hour12: true 
+		});
+	}
+
+	// Real-time countdown update
+	let countdownInterval: ReturnType<typeof setInterval> | null = null;
+	let timeDisplay = $state(getTimeRemaining());
+	let expiryTimeDisplay = $state(getExpirationTime());
+
+	$effect(() => {
+		if (authStatus === 'authenticated' && authTokenExpiry) {
+			if (countdownInterval) clearInterval(countdownInterval);
+			
+			countdownInterval = setInterval(() => {
+				timeDisplay = getTimeRemaining();
+				expiryTimeDisplay = getExpirationTime();
+			}, 1000);
+		} else {
+			if (countdownInterval) {
+				clearInterval(countdownInterval);
+				countdownInterval = null;
 			}
-		} catch (e) {
-			agentError = "Agent not connected";
-		} finally {
-			agentLoading = false;
 		}
+	});
+
+	onMount(() => {
+		// Fetch agent card for DID
+		fetch("/api/agent-card")
+			.then((res) => {
+				if (res.ok) {
+					return res.json();
+				} else {
+					agentError = "Could not load agent info";
+					return null;
+				}
+			})
+			.then((data) => {
+				if (data) {
+					agentCard = data;
+				}
+			})
+			.catch(() => {
+				agentError = "Agent not connected";
+			})
+			.finally(() => {
+				agentLoading = false;
+			});
 
 		// Initialize auth state
 		if (authToken && authTokenExpiry) {
@@ -172,6 +214,7 @@
 		return () => {
 			clearInterval(interval);
 			if (authRefreshTimer) clearTimeout(authRefreshTimer);
+			if (countdownInterval) clearInterval(countdownInterval);
 		};
 	});
 </script>
@@ -213,9 +256,14 @@
 					{/if}
 				</div>
 				{#if authStatus === "authenticated" && authTokenExpiry}
-					<span class="text-xs text-gray-500 dark:text-gray-400">
-						Expires in {getTimeRemaining()}
-					</span>
+					<div class="flex flex-col items-end gap-0.5">
+						<span class="text-xs font-medium text-gray-600 dark:text-gray-400">
+							{timeDisplay}
+						</span>
+						<span class="text-[10px] text-gray-500 dark:text-gray-500">
+							Expires at {expiryTimeDisplay}
+						</span>
+					</div>
 				{/if}
 			</div>
 
@@ -264,6 +312,24 @@
 					placeholder="Enter your client secret"
 					disabled={authStatus === "loading" || authStatus === "authenticated"}
 					class="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:placeholder-gray-500 dark:disabled:bg-gray-800"
+				/>
+			</div>
+
+			<!-- Scope Input -->
+			<div>
+				<label
+					for="scope"
+					class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+				>
+					Scope
+				</label>
+				<input
+					id="scope"
+					type="text"
+					bind:value={scope}
+					placeholder="openid offline agent:read agent:write"
+					disabled={authStatus === "loading" || authStatus === "authenticated"}
+					class="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 font-mono text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:placeholder-gray-500 dark:disabled:bg-gray-800"
 				/>
 			</div>
 
