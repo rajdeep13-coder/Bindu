@@ -29,7 +29,7 @@ cd bindu
 uv sync --dev
 
 # Set up your API key
-export OPENROUTER_API_KEY="your-key-here"
+export OPENROUTER_API_KEY="your-key-here"  # pragma: allowlist secret
 ```
 
 ### Run Your First Agent
@@ -154,7 +154,7 @@ HYDRA__PUBLIC_URL=https://hydra.getbindu.com
 
 ```bash
 # PostgreSQL for persistent storage
-DATABASE_URL=postgresql+asyncpg://user:pass@host/db
+DATABASE_URL=postgresql+asyncpg://user:pass@host/db  # pragma: allowlist secret
 
 # Redis for advanced scheduling
 REDIS_URL=rediss://default:pass@host:6379
