@@ -285,8 +285,18 @@ class DIDAgentExtension:
         """
         # Use custom bindu format if author, agent_name, and agent_id provided
         if self.author and self.agent_name and self.agent_id:
-            sanitized_author = self.author.lower().replace(" ", "_").replace("@", "_at_").replace(".", "_")
-            sanitized_agent_name = self.agent_name.lower().replace(" ", "_").replace("@", "_at_").replace(".", "_")
+            sanitized_author = (
+                self.author.lower()
+                .replace(" ", "_")
+                .replace("@", "_at_")
+                .replace(".", "_")
+            )
+            sanitized_agent_name = (
+                self.agent_name.lower()
+                .replace(" ", "_")
+                .replace("@", "_at_")
+                .replace(".", "_")
+            )
             return f"did:{app_settings.did.method_bindu}:{sanitized_author}:{sanitized_agent_name}:{self.agent_id}"
 
         # Fallback to did:key format with multibase encoding
