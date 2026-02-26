@@ -64,6 +64,9 @@ class ConfigValidator:
         Raises:
             ValueError: If required fields are missing or invalid
         """
+        if not isinstance(config, dict):
+            raise TypeError("config must be a dictionary")
+
         # Check required fields
         missing_fields = [field for field in cls.REQUIRED_FIELDS if field not in config]
         if missing_fields:

@@ -162,6 +162,12 @@ def bindufy(
 
         manifest = bindufy(agent, config, my_handler)
     """
+    if not isinstance(config, dict):
+        raise TypeError("config must be a dictionary")
+
+    if not callable(handler):
+        raise TypeError("handler must be callable")
+
     # Load capability-specific configs from environment variables (webhooks, negotiation)
     config = load_config_from_env(config)
 
