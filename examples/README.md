@@ -26,6 +26,18 @@ uv run examples/beginner/echo_simple_agent.py
 
 Agents run on ports 3773-3780 with UI at `http://localhost:[port]/docs`
 
+You can override the port for any example without editing code:
+
+```bash
+# Linux/macOS
+export BINDU_PORT=4000
+
+# Windows PowerShell
+$env:BINDU_PORT="4000"
+```
+
+For full URL override, use `BINDU_DEPLOYMENT_URL` (e.g. `http://127.0.0.1:5001`).
+
 ## Examples
 
 ### Beginner
@@ -55,6 +67,9 @@ Agents run on ports 3773-3780 with UI at `http://localhost:[port]/docs`
 OPENROUTER_API_KEY=sk-or-v1-your-api-key-here
 
 # Optional
+PORT=4000
+BINDU_PORT=4000
+BINDU_DEPLOYMENT_URL=http://localhost:4000
 HYDRA__ADMIN_URL=https://hydra-admin.getbindu.com
 HYDRA__PUBLIC_URL=https://hydra.getbindu.com
 DATABASE_URL=postgresql+asyncpg://user:pass@host/db  # pragma: allowlist secret
@@ -81,7 +96,7 @@ npm run dev
 
 ### API
 ```bash
-curl -X POST http://localhost:3773/ \
+curl -X POST ${BINDU_DEPLOYMENT_URL:-http://localhost:${BINDU_PORT:-3773}}/ \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"message/send","params":{...},"id":"1"}'
 ```

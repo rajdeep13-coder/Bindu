@@ -81,6 +81,41 @@ def bindufy_stubs(monkeypatch):
     monkeypatch.setattr(bindufy_module.app_settings.auth, "enabled", False, raising=False)
 
 
+@pytest.fixture
+def bindufy_stubs_with_env_loader(monkeypatch):
+    """Stub bindufy dependencies while keeping real load_config_from_env logic."""
+    import bindu.server as server_module
+    import bindu.penguin.bindufy as bindufy_module
+
+    class DummyBinduApplication:
+        def __init__(self, **kwargs):
+            self.url = kwargs["manifest"].url
+            self._agent_card_json_schema = None
+
+    monkeypatch.setattr(bindufy_module, "create_storage_config_from_env", lambda _cfg: None)
+    monkeypatch.setattr(
+        bindufy_module, "create_scheduler_config_from_env", lambda _cfg: None
+    )
+    monkeypatch.setattr(bindufy_module, "create_sentry_config_from_env", lambda _cfg: None)
+    monkeypatch.setattr(bindufy_module, "create_vault_config_from_env", lambda _cfg: None)
+    monkeypatch.setattr(bindufy_module, "create_auth_config_from_env", lambda _cfg: None)
+    monkeypatch.setattr(bindufy_module, "update_vault_settings", lambda _cfg: None)
+    monkeypatch.setattr(bindufy_module, "update_auth_settings", lambda _cfg: None)
+    monkeypatch.setattr(bindufy_module, "load_skills", lambda skills, _caller_dir: skills)
+    monkeypatch.setattr(
+        bindufy_module,
+        "resolve_key_directory",
+        lambda explicit_dir, caller_dir, subdir: Path(caller_dir) / subdir,
+    )
+    monkeypatch.setattr(
+        bindufy_module,
+        "initialize_did_extension",
+        lambda **_kwargs: SimpleNamespace(did="did:bindu:tester:test-agent"),
+    )
+    monkeypatch.setattr(server_module, "BinduApplication", DummyBinduApplication)
+    monkeypatch.setattr(bindufy_module.app_settings.auth, "enabled", False, raising=False)
+
+
 def test_bindufy_happy_path_returns_manifest(valid_config, valid_handler, bindufy_stubs):
     """bindufy should return a manifest for valid config and handler."""
     manifest = bindufy(valid_config, valid_handler, run_server=False)
@@ -183,3 +218,25 @@ def test_config_validator_converts_skill_dicts_to_skill_models(valid_config):
 
     assert len(processed["skills"]) == 1
     assert processed["skills"][0]["id"] == "summarize"
+
+
+def test_bindufy_overrides_deployment_port_from_bindu_port_env(
+    valid_config, valid_handler, bindufy_stubs_with_env_loader, monkeypatch
+):
+    """BINDU_PORT should override the configured deployment port."""
+    monkeypatch.setenv("BINDU_PORT", "4000")
+
+    manifest = bindufy(valid_config, valid_handler, run_server=False)
+
+    assert manifest.url == "http://localhost:4000"
+
+
+def test_bindufy_overrides_deployment_url_from_env(
+    valid_config, valid_handler, bindufy_stubs_with_env_loader, monkeypatch
+):
+    """BINDU_DEPLOYMENT_URL should override the full configured URL."""
+    monkeypatch.setenv("BINDU_DEPLOYMENT_URL", "http://127.0.0.1:5001")
+
+    manifest = bindufy(valid_config, valid_handler, run_server=False)
+
+    assert manifest.url == "http://127.0.0.1:5001"
